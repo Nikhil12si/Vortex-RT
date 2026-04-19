@@ -1,0 +1,6 @@
+# Compiled object files
+*.o
+
+# Executables
+demo
+benchmark
