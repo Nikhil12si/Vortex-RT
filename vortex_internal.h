@@ -3,12 +3,26 @@
 
 #include "vortex.h"
 
-// Pointer to the currently executing thread
 extern TCB *current_thread;
 
-// Queue operations for the custom round-robin scheduler
-void scheduler_enqueue(TCB *thread);
-TCB *scheduler_dequeue(void);
-int scheduler_queue_empty(void);
+long long get_time_ms(void);
+
+// Advanced OS Registry mapping
+void scheduler_register_thread(TCB *thread);
+TCB *scheduler_get_thread(int id);
+
+// Queueing
+void scheduler_enqueue_ready(TCB *thread);
+void scheduler_enqueue_sleep(TCB *thread);
+
+// Advanced Mechanics Checkers
+void scheduler_process_sleep_queue(void);
+void scheduler_process_aging(void); // Promotes starving threads!
+
+TCB *scheduler_dequeue_ready(void);
+int scheduler_ready_empty(void);
+
+void wait_queue_enqueue(TCB **head, TCB **tail, TCB *thread);
+TCB *wait_queue_dequeue(TCB **head, TCB **tail);
 
 #endif // VORTEX_INTERNAL_H

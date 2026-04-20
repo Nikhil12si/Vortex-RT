@@ -6,37 +6,104 @@
 typedef enum {
     THREAD_READY,
     THREAD_RUNNING,
+    THREAD_SLEEPING,
+    THREAD_WAITING_LOCK,
+    THREAD_WAITING_COND,
+    THREAD_WAITING_JOIN,  // Blocking on another thread to die
+    THREAD_WAITING_SEM,   // Blocking on a Semaphore token
+    THREAD_ZOMBIE,        // Finished execution, retaining return value for extraction
     THREAD_FINISHED
 } ThreadState;
 
-// Thread Control Block structure
+#define PRIORITY_HIGH   0
+#define PRIORITY_NORMAL 1
+#define PRIORITY_LOW    2
+#define AGING_THRESHOLD_MS 1500 // Automatically promote priority if starved
+
 typedef struct ThreadControlBlock {
-    int id;                        // Thread ID
-    char *stack;                   // Stack Pointer (dynamically allocated)
-    ucontext_t context;            // Execution Context for context switching
-    ThreadState state;             // Thread State (READY, RUNNING, FINISHED)
-    int time_slice;                // Scheduling time-slice data
-    void (*func)(void*);           // Function pointer for the thread execution
-    void *arg;                     // Arguments to pass to the function
-    struct ThreadControlBlock *next; // Pointer to the next TCB in the run queue
+    int id;
+    int priority;
+    long long wakeup_time;
+    long long last_run_time; // Kernel tracking mechanism for Starvation Aging
+    int has_been_promoted;   // Visualization tracker 
+    
+    char *stack;
+    ucontext_t context;
+    ThreadState state;
+    
+    void* (*func)(void*);    // Upgraded standard OS payload signature
+    void *arg;
+    void *retval;            // Extracted mathematical payload upon death
+
+    struct ThreadControlBlock *joining_thread; // The thread tracking our lifecycle
+    struct ThreadControlBlock *next;
 } TCB;
 
-// Initialize the Vortex-RT library
+/* =========================================
+ * CORE LIFECYCLE MECHANICS
+ * ========================================= */
 void vortex_init(void);
-
-// Create a new thread and enqueue it. Returns the thread ID.
-int vortex_create(void (*func)(void*), void *arg);
-
-// Voluntarily yield the CPU to the next thread
+int vortex_create(void* (*func)(void*), void *arg, int priority);
 void vortex_yield(void);
+void vortex_sleep(int ms);
+void vortex_exit(void *retval);
 
-// Automatically called when a thread's function returns
-void vortex_exit(void);
-
-// Wait for all initialized threads to finish execution
+// NEW: Dynamically wait for a specific thread identifier to perish and extract its value
+int vortex_join(int thread_id, void **retval);
 void vortex_wait_all(void);
 
-// Display the live run queue visualizer
-void vortex_print_queue_status(void);
+// Hooks
+void vortex_print_dashboard(void);
+void vortex_print_dining_dashboard(void);
+
+/* =========================================
+ * SYNCHRONIZATION: MUTEXES
+ * ========================================= */
+typedef struct {
+    int locked;
+    int owner_id;
+    TCB *wait_queue_head;
+    TCB *wait_queue_tail;
+} vortex_mutex_t;
+
+void vortex_mutex_init(vortex_mutex_t *mutex);
+void vortex_mutex_lock(vortex_mutex_t *mutex);
+void vortex_mutex_unlock(vortex_mutex_t *mutex);
+
+/* =========================================
+ * SYNCHRONIZATION: CONDITION VARIABLES
+ * ========================================= */
+typedef struct {
+    TCB *wait_queue_head;
+    TCB *wait_queue_tail;
+} vortex_cond_t;
+
+void vortex_cond_init(vortex_cond_t *cond);
+void vortex_cond_wait(vortex_cond_t *cond, vortex_mutex_t *mutex);
+void vortex_cond_signal(vortex_cond_t *cond);
+
+/* =========================================
+ * SYNCHRONIZATION: COUNTING SEMAPHORES (NEW)
+ * ========================================= */
+typedef struct {
+    int count;
+    TCB *wait_queue_head;
+    TCB *wait_queue_tail;
+} vortex_sem_t;
+
+void vortex_sem_init(vortex_sem_t *sem, int count);
+void vortex_sem_wait(vortex_sem_t *sem);
+void vortex_sem_post(vortex_sem_t *sem);
+
+/* =========================================
+ * SYNCHRONIZATION: ATOMIC SPINLOCKS
+ * ========================================= */
+typedef struct {
+    volatile int flag;
+} vortex_spinlock_t;
+
+void vortex_spinlock_init(vortex_spinlock_t *lock);
+void vortex_spinlock_lock(vortex_spinlock_t *lock);
+void vortex_spinlock_unlock(vortex_spinlock_t *lock);
 
 #endif // VORTEX_H
