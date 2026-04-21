@@ -1,7 +1,11 @@
 #ifndef VORTEX_H
 #define VORTEX_H
 
-#include <ucontext.h>
+#include <atomic>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef enum {
     THREAD_READY,
@@ -28,7 +32,7 @@ typedef struct ThreadControlBlock {
     int has_been_promoted;   // Visualization tracker 
     
     char *stack;
-    ucontext_t context;
+    void *sp;  // Custom hardware stack pointer
     ThreadState state;
     
     void* (*func)(void*);    // Upgraded standard OS payload signature
@@ -37,7 +41,7 @@ typedef struct ThreadControlBlock {
 
     struct ThreadControlBlock *joining_thread; // The thread tracking our lifecycle
     struct ThreadControlBlock *next;
-} TCB;
+} __attribute__((aligned(64))) TCB; // HFT cache-line alignment to prevent False Sharing
 
 /* =========================================
  * CORE LIFECYCLE MECHANICS
@@ -99,11 +103,15 @@ void vortex_sem_post(vortex_sem_t *sem);
  * SYNCHRONIZATION: ATOMIC SPINLOCKS
  * ========================================= */
 typedef struct {
-    volatile int flag;
+    std::atomic_flag flag;
 } vortex_spinlock_t;
 
 void vortex_spinlock_init(vortex_spinlock_t *lock);
 void vortex_spinlock_lock(vortex_spinlock_t *lock);
 void vortex_spinlock_unlock(vortex_spinlock_t *lock);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // VORTEX_H

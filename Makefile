@@ -1,35 +1,38 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -O2 -g -Wno-deprecated-declarations
+CXX = g++
+CFLAGS = -Wall -Wextra -O2 -g -Wno-deprecated-declarations -std=c++17
 LDFLAGS = -pthread
 
 all: demo benchmark dining
 
-demo: demo.o vortex.o scheduler.o sync.o
-	$(CC) $(CFLAGS) -o demo demo.o vortex.o scheduler.o sync.o
+demo: demo.o vortex.o scheduler.o sync.o vortex_context.o
+	$(CXX) $(CFLAGS) -o demo demo.o vortex.o scheduler.o sync.o vortex_context.o
 
-benchmark: benchmark.o vortex.o scheduler.o sync.o
-	$(CC) $(CFLAGS) -o benchmark benchmark.o vortex.o scheduler.o sync.o $(LDFLAGS)
+benchmark: benchmark.o vortex.o scheduler.o sync.o vortex_context.o
+	$(CXX) $(CFLAGS) -o benchmark benchmark.o vortex.o scheduler.o sync.o vortex_context.o $(LDFLAGS)
 
-dining: dining.o vortex.o scheduler.o sync.o
-	$(CC) $(CFLAGS) -o dining dining.o vortex.o scheduler.o sync.o
+dining: dining.o vortex.o scheduler.o sync.o vortex_context.o
+	$(CXX) $(CFLAGS) -o dining dining.o vortex.o scheduler.o sync.o vortex_context.o
 
-demo.o: demo.c vortex.h
-	$(CC) $(CFLAGS) -c demo.c
+demo.o: demo.cpp vortex.h
+	$(CXX) $(CFLAGS) -c demo.cpp
 
-benchmark.o: benchmark.c vortex.h
-	$(CC) $(CFLAGS) -c benchmark.c
+benchmark.o: benchmark.cpp vortex.h
+	$(CXX) $(CFLAGS) -c benchmark.cpp
 
-dining.o: dining.c vortex.h
-	$(CC) $(CFLAGS) -c dining.c
+dining.o: dining.cpp vortex.h
+	$(CXX) $(CFLAGS) -c dining.cpp
 
-vortex.o: vortex.c vortex.h vortex_internal.h
-	$(CC) $(CFLAGS) -c vortex.c
+vortex.o: vortex.cpp vortex.h vortex_internal.h
+	$(CXX) $(CFLAGS) -c vortex.cpp
 
-scheduler.o: scheduler.c vortex.h vortex_internal.h
-	$(CC) $(CFLAGS) -c scheduler.c
+scheduler.o: scheduler.cpp vortex.h vortex_internal.h
+	$(CXX) $(CFLAGS) -c scheduler.cpp
 
-sync.o: sync.c vortex.h vortex_internal.h
-	$(CC) $(CFLAGS) -c sync.c
+sync.o: sync.cpp vortex.h vortex_internal.h
+	$(CXX) $(CFLAGS) -c sync.cpp
+
+vortex_context.o: vortex_context.S
+	$(CXX) $(CFLAGS) -c vortex_context.S
 
 clean:
-	rm -f *.o demo benchmark dining
+	del /Q *.o demo.exe benchmark.exe dining.exe 2>NUL

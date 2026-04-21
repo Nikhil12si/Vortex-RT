@@ -7,11 +7,59 @@
 
 #define STACK_SIZE (1024 * 64)
 
+#include <stdint.h>
+
+#if defined(_WIN32) || defined(__WIN32__) || defined(__CYGWIN__)
+#include <windows.h>
+#include <malloc.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
+static char* allocate_secure_stack(size_t stack_size) {
+#if defined(_WIN32) || defined(__WIN32__) || defined(__CYGWIN__)
+    SYSTEM_INFO sysInfo;
+    GetSystemInfo(&sysInfo);
+    long page_size = sysInfo.dwPageSize;
+    size_t alloc_size = stack_size + page_size;
+    char *stack = (char *)VirtualAlloc(NULL, alloc_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!stack) { perror("VirtualAlloc stack failed"); exit(1); }
+    DWORD oldProtect;
+    if (!VirtualProtect(stack, page_size, PAGE_NOACCESS, &oldProtect)) {
+        perror("VirtualProtect guard page failed"); exit(1);
+    }
+    return stack + page_size;
+#else
+    long page_size = sysconf(_SC_PAGESIZE);
+    size_t alloc_size = stack_size + page_size;
+    char *stack = mmap(NULL, alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (stack == MAP_FAILED) { perror("mmap stack failed"); exit(1); }
+    if (mprotect(stack, page_size, PROT_NONE) == -1) {
+        perror("mprotect guard page failed"); exit(1);
+    }
+    return stack + page_size;
+#endif
+}
+
+static TCB* allocate_tcb_from_pool() {
+#if defined(_WIN32) || defined(__WIN32__) || defined(__CYGWIN__)
+    TCB* new_thread = (TCB*)_aligned_malloc(sizeof(TCB), 64);
+    if (!new_thread) { perror("_aligned_malloc TCB"); exit(1); }
+#else
+    TCB* new_thread;
+    if (posix_memalign((void**)&new_thread, 64, sizeof(TCB)) != 0) {
+        perror("posix_memalign TCB"); exit(1);
+    }
+#endif
+    return new_thread;
+}
+
 static int next_thread_id = 0; // The Main Thread defaults functionally to ID: 0
 
 void vortex_init(void) {
     // Elevate the Root Master OS Process (main) into a natively managed ThreadControlBlock!
-    TCB *main_thread = (TCB *)malloc(sizeof(TCB));
+    TCB *main_thread = allocate_tcb_from_pool();
     if (!main_thread) { perror("malloc main"); exit(1); }
     
     main_thread->id = next_thread_id++;
@@ -39,8 +87,7 @@ static void thread_wrapper(void) {
 }
 
 int vortex_create(void* (*func)(void*), void *arg, int priority) {
-    TCB *new_thread = (TCB *)malloc(sizeof(TCB));
-    if (!new_thread) { perror("malloc"); exit(1); }
+    TCB *new_thread = allocate_tcb_from_pool();
     
     new_thread->id = next_thread_id++;
     new_thread->priority = priority;
@@ -54,14 +101,30 @@ int vortex_create(void* (*func)(void*), void *arg, int priority) {
     new_thread->retval = NULL;
     new_thread->joining_thread = NULL;
     
-    new_thread->stack = (char *)malloc(STACK_SIZE);
+    new_thread->stack = allocate_secure_stack(STACK_SIZE);
     
-    if (getcontext(&new_thread->context) == -1) { perror("getcontext"); exit(1); }
-    new_thread->context.uc_stack.ss_sp = new_thread->stack;
-    new_thread->context.uc_stack.ss_size = STACK_SIZE;
-    new_thread->context.uc_link = NULL; // Manual hooking
+    uint64_t *stack_top = (uint64_t *)(new_thread->stack + STACK_SIZE);
+    *(--stack_top) = (uint64_t)thread_wrapper;
     
-    makecontext(&new_thread->context, thread_wrapper, 0);
+#if defined(_WIN32) || defined(__WIN32__) || defined(__CYGWIN__)
+    *(--stack_top) = 0; // rbp
+    *(--stack_top) = 0; // rbx
+    *(--stack_top) = 0; // rdi
+    *(--stack_top) = 0; // rsi
+    *(--stack_top) = 0; // r12
+    *(--stack_top) = 0; // r13
+    *(--stack_top) = 0; // r14
+    *(--stack_top) = 0; // r15
+#else
+    *(--stack_top) = 0; // rbp
+    *(--stack_top) = 0; // rbx
+    *(--stack_top) = 0; // r12
+    *(--stack_top) = 0; // r13
+    *(--stack_top) = 0; // r14
+    *(--stack_top) = 0; // r15
+#endif
+    
+    new_thread->sp = stack_top;
     
     scheduler_register_thread(new_thread);
     scheduler_enqueue_ready(new_thread);
@@ -99,9 +162,7 @@ void vortex_yield(void) {
     next_thread->state = THREAD_RUNNING;
     current_thread = next_thread;
     
-    if (swapcontext(&prev_thread->context, &next_thread->context) == -1) {
-        perror("swapcontext"); exit(1);
-    }
+    vortex_swap(&prev_thread->sp, &next_thread->sp);
 }
 
 void vortex_sleep(int ms) {
@@ -131,8 +192,8 @@ void vortex_exit(void *retval) {
     
     // Idle OS Core Fallback Protocol
     if (next_thread == NULL) {
-        extern TCB *sleep_queue_head;
-        while (scheduler_ready_empty() && sleep_queue_head != NULL) {
+        // extern removed
+        while (scheduler_ready_empty() && !scheduler_sleep_empty()) {
             struct timespec req = {0, 1000 * 1000}; 
             nanosleep(&req, NULL);
             scheduler_process_sleep_queue();
@@ -148,7 +209,8 @@ void vortex_exit(void *retval) {
     
     next_thread->state = THREAD_RUNNING;
     current_thread = next_thread;
-    setcontext(&next_thread->context);
+    void *dummy_sp; 
+    vortex_swap(&dummy_sp, &next_thread->sp);
 }
 
 int vortex_join(int thread_id, void **retval) {
@@ -175,12 +237,12 @@ int vortex_join(int thread_id, void **retval) {
 }
 
 void vortex_wait_all(void) {
-    extern TCB *sleep_queue_head;
+    // extern removed
     while(1) {
         scheduler_process_sleep_queue();
         scheduler_process_aging();
         
-        if (scheduler_ready_empty() && sleep_queue_head == NULL) {
+        if (scheduler_ready_empty() && scheduler_sleep_empty()) {
             break;
         }
         

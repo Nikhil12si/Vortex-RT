@@ -2,6 +2,15 @@
 #include "vortex_internal.h"
 #include <stddef.h>
 
+#if defined(__x86_64__) || defined(__i386__)
+  #include <immintrin.h>
+  #define CPU_PAUSE() _mm_pause()
+#elif defined(__aarch64__)
+  #define CPU_PAUSE() __asm__ volatile("yield" ::: "memory")
+#else
+  #define CPU_PAUSE() do {} while(0)
+#endif
+
 void vortex_mutex_init(vortex_mutex_t *mutex) {
     mutex->locked = 0;
     mutex->owner_id = -1;
@@ -87,13 +96,14 @@ void vortex_sem_post(vortex_sem_t *sem) {
     }
 }
 
-// ... Spinlocks
 void vortex_spinlock_init(vortex_spinlock_t *lock) {
-    lock->flag = 0;
+    lock->flag.clear(std::memory_order_relaxed);
 }
 void vortex_spinlock_lock(vortex_spinlock_t *lock) {
-    while (__atomic_test_and_set(&lock->flag, __ATOMIC_ACQUIRE)) {}
+    while (lock->flag.test_and_set(std::memory_order_acquire)) {
+        CPU_PAUSE();
+    }
 }
 void vortex_spinlock_unlock(vortex_spinlock_t *lock) {
-    __atomic_clear(&lock->flag, __ATOMIC_RELEASE);
+    lock->flag.clear(std::memory_order_release);
 }

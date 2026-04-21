@@ -5,6 +5,9 @@
 
 extern TCB *current_thread;
 
+// ASM Context Switcher (Dual ABI)
+extern "C" void vortex_swap(void **prev_sp, void **next_sp);
+
 long long get_time_ms(void);
 
 // Advanced OS Registry mapping
@@ -21,6 +24,8 @@ void scheduler_process_aging(void); // Promotes starving threads!
 
 TCB *scheduler_dequeue_ready(void);
 int scheduler_ready_empty(void);
+
+extern "C" int scheduler_sleep_empty(void);
 
 void wait_queue_enqueue(TCB **head, TCB **tail, TCB *thread);
 TCB *wait_queue_dequeue(TCB **head, TCB **tail);

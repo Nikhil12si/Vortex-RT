@@ -5,6 +5,15 @@
 #include <time.h>
 #include <sched.h>
 #include "vortex.h"
+#if defined(__x86_64__) || defined(__i386__)
+#include <x86intrin.h>
+#else
+static inline unsigned long long __rdtsc() {
+    unsigned int lo, hi;
+    __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
+    return ((unsigned long long)hi << 32) | lo;
+}
+#endif
 
 #define NUM_THREADS 500
 #define NUM_LOCKS   5000
@@ -52,8 +61,8 @@ void *vortex_spinlock_worker(void *arg) {
 }
 
 int main(void) {
-    struct timespec start, end;
-    double t_pthread, t_vmutex, t_vspin;
+    unsigned long long start, end;
+    unsigned long long t_pthread, t_vmutex, t_vspin;
     
     printf("\n\033[1;36m========================================================================================\033[0m\n");
     printf("\033[1;33m [VORTEX-RT] SUBSYSTEM: Context-Switch Latency Benchmark Suite\033[0m\n");
@@ -67,7 +76,7 @@ int main(void) {
     // Scenario A
     printf("Benchmarking A: System Pthreads + pthread_mutex_t...\n");
     shared_counter = 0;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    start = __rdtsc();
     pthread_t pt[NUM_THREADS];
     for(int i=0; i<NUM_THREADS; i++) {
         pthread_create(&pt[i], NULL, pthread_worker, NULL);
@@ -75,49 +84,49 @@ int main(void) {
     for(int i=0; i<NUM_THREADS; i++) {
         pthread_join(pt[i], NULL);
     }
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    t_pthread = time_diff(&start, &end);
+    end = __rdtsc();
+    t_pthread = end - start;
 
     // Scenario B
     printf("Benchmarking B: Vortex-RT + Yielding Mutex...\n");
     shared_counter = 0;
     vortex_init();
     vortex_mutex_init(&v_mutex);
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    start = __rdtsc();
     for(int i=0; i<NUM_THREADS; i++) {
         vortex_create(vortex_mutex_worker, NULL, PRIORITY_NORMAL);
     }
     vortex_wait_all();
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    t_vmutex = time_diff(&start, &end);
+    end = __rdtsc();
+    t_vmutex = end - start;
 
     // Scenario C
     printf("Benchmarking C: Vortex-RT + Atomic Spinlock...\n\n");
     shared_counter = 0;
     vortex_init(); 
     vortex_spinlock_init(&v_spinlock);
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    start = __rdtsc();
     for(int i=0; i<NUM_THREADS; i++) {
         vortex_create(vortex_spinlock_worker, NULL, PRIORITY_HIGH);
     }
     vortex_wait_all();
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    t_vspin = time_diff(&start, &end);
+    end = __rdtsc();
+    t_vspin = end - start;
 
     // Chart Output
-    printf("\033[1;37m[ EXECUTION LATENCY (Lower is better) ]\033[0m\n");
-    printf("A. Kernel Pthreads : \033[1;31m%.5f sec\033[0m\n", t_pthread);
-    printf("B. Vortex Mutexes  : \033[1;32m%.5f sec\033[0m\n", t_vmutex);
-    printf("C. Vortex Spinlocks: \033[1;36m%.5f sec\033[0m\n\n", t_vspin);
+    printf("\033[1;37m[ EXECUTION LATENCY IN CPU CYCLES (Lower is better) ]\033[0m\n");
+    printf("A. Kernel Pthreads : \033[1;31m%llu Cycles\033[0m\n", t_pthread);
+    printf("B. Vortex Mutexes  : \033[1;32m%llu Cycles\033[0m\n", t_vmutex);
+    printf("C. Vortex Spinlocks: \033[1;36m%llu Cycles\033[0m\n\n", t_vspin);
 
     printf("\033[1;37m[ PERFORMANCE CHART ]\033[0m\n");
-    double mx = t_pthread > t_vmutex ? t_pthread : t_vmutex;
+    double mx = t_pthread > t_vmutex ? (double)t_pthread : (double)t_vmutex;
     if (t_vspin > mx) mx = t_vspin;
     if (mx == 0) mx = 1;
 
-    int bA = (int)((t_pthread / mx) * 50.0);
-    int bB = (int)((t_vmutex / mx) * 50.0);
-    int bC = (int)((t_vspin / mx) * 50.0);
+    int bA = (int)(((double)t_pthread / mx) * 50.0);
+    int bB = (int)(((double)t_vmutex / mx) * 50.0);
+    int bC = (int)(((double)t_vspin / mx) * 50.0);
 
     if (bA == 0 && t_pthread > 0) bA = 1;
     if (bB == 0 && t_vmutex > 0) bB = 1;

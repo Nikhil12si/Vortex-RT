@@ -3,12 +3,26 @@
 #include "vortex_internal.h"
 #include <stdio.h>
 #include <time.h>
+#include <queue>
+#include <vector>
+
 
 TCB *current_thread = NULL;
 
 static TCB *ready_queue_head[3] = {NULL, NULL, NULL};
 static TCB *ready_queue_tail[3] = {NULL, NULL, NULL};
-TCB *sleep_queue_head = NULL;
+// O(1) Min-Heap for Sleep Queue using std::priority_queue
+struct CompareTCB {
+    bool operator()(TCB* const& t1, TCB* const& t2) {
+        // min-heap based on wakeup_time
+        return t1->wakeup_time > t2->wakeup_time;
+    }
+};
+static std::priority_queue<TCB*, std::vector<TCB*>, CompareTCB> sleep_heap;
+
+extern "C" int scheduler_sleep_empty(void) {
+    return sleep_heap.empty() ? 1 : 0;
+}
 
 // OS Thread Registry Mapping
 #define MAX_THREADS 4096
@@ -75,30 +89,18 @@ int scheduler_ready_empty(void) {
 }
 
 void scheduler_enqueue_sleep(TCB *thread) {
-    thread->next = sleep_queue_head;
-    sleep_queue_head = thread;
+    sleep_heap.push(thread);
 }
 
 void scheduler_process_sleep_queue(void) {
-    if (!sleep_queue_head) return;
     long long now = get_time_ms();
-    
-    TCB *curr = sleep_queue_head;
-    TCB *prev = NULL;
-    
-    while (curr != NULL) {
-        if (now >= curr->wakeup_time) {
-            TCB *to_wake = curr;
-            if (prev == NULL) sleep_queue_head = curr->next;
-            else prev->next = curr->next;
-            
-            curr = curr->next;
-            to_wake->state = THREAD_READY;
-            scheduler_enqueue_ready(to_wake);
-        } else {
-            prev = curr;
-            curr = curr->next;
-        }
+    // O(1) peek at the earliest sleeping thread!
+    while (!sleep_heap.empty() && now >= sleep_heap.top()->wakeup_time) {
+        TCB *to_wake = sleep_heap.top();
+        sleep_heap.pop();
+        
+        to_wake->state = THREAD_READY;
+        scheduler_enqueue_ready(to_wake);
     }
 }
 
@@ -201,14 +203,17 @@ void vortex_print_dashboard(void) {
     }
     
     printf("\033[1;36mSleeping Threads     : \033[0m");
-    TCB *s = sleep_queue_head;
-    if (!s) printf("[None]");
+    if (sleep_heap.empty()) printf("[None]");
     long long now = get_time_ms();
-    while (s) {
+    
+    // Copy queue to print
+    auto temp_queue = sleep_heap;
+    while (!temp_queue.empty()) {
+        TCB *s = temp_queue.top();
+        temp_queue.pop();
         long long remaining = s->wakeup_time - now;
         if (remaining < 0) remaining = 0;
         printf("[Thread %d (%lldms)] ", s->id, remaining);
-        s = s->next;
     }
     printf("\n");
     fflush(stdout);

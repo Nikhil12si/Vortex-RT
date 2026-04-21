@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <unistd.h>
+#include <stdint.h>
 #include "vortex.h"
 
 // Constants
@@ -10,7 +11,7 @@
 vortex_sem_t chopsticks[NUM_PHILOSOPHERS];
 
 void *philosopher(void *arg) {
-    int id = (int)(long)arg;
+    int id = (int)(intptr_t)arg;
     int left = id;
     int right = (id + 1) % NUM_PHILOSOPHERS;
     
@@ -43,7 +44,7 @@ void *philosopher(void *arg) {
     
     // Return a mathematical computational result for the main thread to Join & harvest!
     long result = (id + 1) * 1000;
-    return (void*)result; 
+    return (void*)(intptr_t)result; 
 }
 
 int main(void) {
@@ -68,7 +69,7 @@ int main(void) {
     int p_ids[NUM_PHILOSOPHERS];
     for (int i = 0; i < NUM_PHILOSOPHERS; i++) {
         int priority = (i % 2 == 0) ? PRIORITY_LOW : PRIORITY_HIGH;
-        p_ids[i] = vortex_create(philosopher, (void*)(long)i, priority);
+        p_ids[i] = vortex_create(philosopher, (void*)(intptr_t)i, priority);
     }
     
     // 4. THE ULTIMATE JOINING TEST
@@ -77,7 +78,7 @@ int main(void) {
     for (int i = 0; i < NUM_PHILOSOPHERS; i++) {
         void *ret_payload;
         vortex_join(p_ids[i], &ret_payload);
-        printf("[SYS-TEARDOWN] Main OS Dispatcher successfully reaped Philosopher %d. Payload generated: %ld\n", i, (long)ret_payload);
+        printf("[SYS-TEARDOWN] Main OS Dispatcher successfully reaped Philosopher %d. Payload generated: %ld\n", i, (long)(intptr_t)ret_payload);
     }
     
     printf("\n\033[1;32m[SYS-RESULT] Subsystem simulation completed. Zero structural deadlocks detected.\033[0m\n\n");
