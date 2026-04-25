@@ -63,17 +63,23 @@ Demonstrates real-time state changes, scheduling, and condition variable synchro
 ./demo
 ```
 
+![Producer-Consumer Demo](images/demo.png)
+
 ### 2. Dining Philosophers Simulator
 Demonstrates deadlock-avoidance using semaphores and mutexes.
 ```bash
 ./dining
 ```
 
+![Dining Philosophers Simulator](images/dining.png)
+
 ### 3. Performance Benchmark
 Runs a comprehensive benchmark comparing Vortex-RT's context-switching and threading efficiency against POSIX pthreads.
 ```bash
 ./benchmark
 ```
+
+![Performance Benchmark](images/benchmark.png)
 
 ## API Reference
 
